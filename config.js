@@ -23,6 +23,12 @@ window.CONFIG = {
   // Archivo con los sectores (GeoJSON con Polygon / MultiPolygon)
   sectoresUrl: "sectores.geojson",
 
+  // Lugares propios que no están en OpenStreetMap (se suman a lugares.json).
+  // "palabras" son sinónimos para encontrarlo. Para sacar lat/lon: click derecho en Google Maps.
+  lugaresExtra: [
+    // { nombre: "Base de la remisería", tipo: "Remisería", palabras: "base remis", lat: -37.3217, lon: -59.1332 },
+  ],
+
   // Propiedad del GeoJSON que tiene el nombre del sector.
   // Si no existe, se prueba con: nombre, name, Name, sector.
   propiedadNombre: "nombre",

@@ -42,21 +42,87 @@
     })
     .catch((e) => mostrarError(`No se pudo cargar ${C.sectoresUrl} (${e.message}).`));
 
-  // ---------- Autocompletado de calles ----------
+  // ---------- Nombres de calles: comparar variantes ----------
+  // "MAHATMA GANDHI", "M GANDHI" y "Gandhi" son la misma calle; Georef a veces solo encuentra una.
+  const STOP = new Set(("AV AVDA AVENIDA CALLE PJE PASAJE DIAG DIAGONAL GRL GRAL GENERAL DR DOCTOR PTE PRESIDENTE INT INTENDENTE " +
+    "CNEL CORONEL TTE TENIENTE ALTE ALMIRANTE SGTO SARGENTO CMTE COMODORO MONS MONSENOR PBRO ING INGENIERO PROF PROFESOR " +
+    "DE DEL LA LAS LOS EL Y").split(" "));
+  const sig = (n) => norm(n).split(" ").filter((t) => t && !STOP.has(t));
+  function mismaCalle(a, b) {
+    const A = sig(a), B = sig(b);
+    if (!A.length || !B.length || A[A.length - 1] !== B[B.length - 1]) return false;
+    const [s, l] = A.length <= B.length ? [A, B] : [B, A];
+    return s.slice(0, -1).every((t) => l.slice(0, -1).some((u) => u === t || (t.length === 1 && u[0] === t) || (u.length === 1 && t[0] === u)));
+  }
+  let callesGeoref = [];
+  function variantes(nombre) {
+    const v = [nombre];
+    for (const n of callesGeoref) if (norm(n) !== norm(nombre) && mismaCalle(n, nombre)) v.push(n);
+    const s = sig(nombre);
+    if (s.length > 1) v.push(s[s.length - 1]);
+    return [...new Map(v.map((x) => [norm(x), x])).values()].slice(0, 4);
+  }
+
+  // ---------- Datos locales (OSM): alturas y lugares ----------
+  let alturas = null, lugares = [];
+  const datosListos = Promise.all([
+    fetch("alturas.json").then((r) => r.json()).then((j) => { alturas = j; }).catch(() => {}),
+    fetch("lugares.json").then((r) => r.json()).catch(() => []).then((j) => {
+      const extra = (C.lugaresExtra || []).map((x) => ({ n: x.nombre, t: x.tipo || "Lugar", k: x.palabras || "", c: [x.lat, x.lon] }));
+      lugares = extra.concat(j);
+      lugares.forEach((l) => { l._q = norm(`${l.n} ${l.t} ${l.k}`).split(" "); });
+      $("#lugares").innerHTML = [...new Map(lugares.map((l) => [l.n, l])).values()]
+        .map((l) => `<option value="${esc(l.n)}">${esc(l.t)}</option>`).join("");
+    }),
+  ]);
+
+  // ---------- Autocompletado de calles (Georef + OSM) ----------
   (async function cargarCalles() {
     const key = "calles:" + JSON.stringify(C.georef);
-    let nombres;
-    try { nombres = JSON.parse(sessionStorage.getItem(key)); } catch (_) {}
-    if (!nombres) {
+    try { callesGeoref = JSON.parse(sessionStorage.getItem(key)) || []; } catch (_) {}
+    if (!callesGeoref.length) {
       try {
         const p = filtros({ max: 5000, campos: "nombre" });
         const j = await (await fetch(`${API}/calles?${p}`)).json();
-        nombres = [...new Set((j.calles || []).map((c) => c.nombre))].sort();
-        try { sessionStorage.setItem(key, JSON.stringify(nombres)); } catch (_) {}
-      } catch (_) { return; }
+        callesGeoref = [...new Set((j.calles || []).map((c) => c.nombre))].filter((n) => !/^CALLE (SN|SIN SALIDA)$/.test(n));
+        try { sessionStorage.setItem(key, JSON.stringify(callesGeoref)); } catch (_) {}
+      } catch (_) {}
     }
+    await datosListos;
+    // nombres de OSM primero (mejor escritos); se omiten los de Georef que ya están
+    const porNorm = new Map();
+    for (const n of Object.keys((alturas && alturas.calles) || {})) porNorm.set(norm(n), n);
+    for (const n of callesGeoref) if (!porNorm.has(norm(n))) porNorm.set(norm(n), n);
+    const nombres = [...porNorm.values()].sort((a, b) => a.localeCompare(b, "es"));
     $("#calles").innerHTML = nombres.map((n) => `<option value="${esc(n)}">`).join("");
   })();
+
+  // Interpolar una altura con los números de puerta de OSM
+  function osmAltura(calle, altura) {
+    const n = parseInt(altura, 10);
+    if (!alturas || !Number.isFinite(n)) return null;
+    const nombres = Object.keys(alturas.calles);
+    let cands = nombres.filter((k) => norm(k) === norm(calle));
+    if (!cands.length) cands = nombres.filter((k) => mismaCalle(k, calle));
+    const metros = (a, b) => Math.hypot(a.lat - b.lat, (a.lon - b.lon) * 0.795) * 111000;
+    let mejor = null;
+    for (const k of cands) {
+      const a = alturas.calles[k], pts = [];
+      for (let i = 0; i < a.length; i += 3) pts.push({ n: a[i], lat: alturas.base[0] + a[i + 1] / 1e5, lon: alturas.base[1] + a[i + 2] / 1e5 });
+      let r = null;
+      const exacto = pts.find((p) => p.n === n);
+      if (exacto) r = { lat: exacto.lat, lon: exacto.lon, err: 0 };
+      else {
+        for (const p of pts) if (p.n < n) for (const q of pts) {
+          if (q.n <= n || q.n - p.n > 200 || metros(p, q) > 300) continue;
+          const err = q.n - p.n + (p.n % 2 !== n % 2 ? 40 : 0) + (q.n % 2 !== n % 2 ? 40 : 0);
+          if (!r || err < r.err) { const t = (n - p.n) / (q.n - p.n); r = { lat: p.lat + (q.lat - p.lat) * t, lon: p.lon + (q.lon - p.lon) * t, err }; }
+        }
+      }
+      if (r && (!mejor || r.err < mejor.err)) mejor = { ...r, calle: k };
+    }
+    return mejor;
+  }
 
   // ---------- Georef ----------
   function filtros(extra) {
@@ -85,12 +151,17 @@
     b.addEventListener("click", () => {
       modo = b.dataset.modo;
       document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
+      $(".campo-calle").hidden = modo === "lugar";
       $(".modo-altura").hidden = modo !== "altura";
       $(".modo-esquina").hidden = modo !== "esquina";
       $(".modo-entre").hidden = modo !== "entre";
+      $(".modo-lugar").hidden = modo !== "lugar";
+      $("#calle").required = modo !== "lugar";
       $("#altura").required = modo === "altura";
       $("#cruce").required = modo === "esquina";
       $("#entre1").required = $("#entre2").required = modo === "entre";
+      $("#lugar").required = modo === "lugar";
+      (modo === "lugar" ? $("#lugar") : $("#calle")).focus();
     })
   );
   $("#altura").required = true;
@@ -103,6 +174,7 @@
     try {
       if (modo === "altura") await buscarAltura();
       else if (modo === "esquina") await buscarEsquina();
+      else if (modo === "lugar") await buscarLugar();
       else await buscarEntre();
     } catch (e) {
       mostrarError("Error consultando el servicio de direcciones: " + e.message);
@@ -112,21 +184,48 @@
     }
   });
 
+  // Prueba la consulta con las variantes del nombre de cada calle hasta que Georef encuentre algo
+  async function georefVariantes(armar, calle, otra) {
+    const vc = variantes(calle), vo = otra ? variantes(otra) : [null];
+    let intentos = 0;
+    for (const a of vc) for (const b of vo) {
+      if (intentos++ >= 8) return [];
+      const res = await georef(armar(a, b), a);
+      if (res.length) return res;
+    }
+    return [];
+  }
+
   async function buscarAltura() {
     const calle = $("#calle").value.trim();
     const altura = $("#altura").value.trim();
-    const res = await georef(`${calle} ${altura}`, calle);
-    if (!res.length) return mostrarError(`No encontré "${calle} ${altura}". Revisá el nombre de la calle (usá las sugerencias) y la altura.`);
-    const d = res[0];
-    const pt = [d.ubicacion.lat, d.ubicacion.lon];
+    // 1) Georef con el nombre tal cual  2) números de puerta de OSM  3) Georef con variantes del nombre
+    let res = await georef(`${calle} ${altura}`, calle);
+    let pt, nomenclatura, alts = [];
+    if (!res.length) {
+      await datosListos;
+      const o = osmAltura(calle, altura);
+      if (o) {
+        pt = [o.lat, o.lon];
+        nomenclatura = `${o.calle} ${altura} (OpenStreetMap${o.err ? ", aproximado" : ""})`;
+      } else {
+        res = await georefVariantes((a) => `${a} ${altura}`, calle);
+      }
+    }
+    if (!pt) {
+      if (!res.length) return mostrarError(`No encontré "${calle} ${altura}". Puede que esa calle no tenga la numeración cargada: probá con la pestaña Esquina o Entre calles.`);
+      pt = [res[0].ubicacion.lat, res[0].ubicacion.lon];
+      nomenclatura = res[0].nomenclatura;
+      alts = alternativas(res);
+    }
     const secs = Geo.sectoresDe(pt, sectores);
 
     marcas.clearLayers();
     L.circleMarker(pt, { radius: 8, color: "#fff", weight: 2, fillColor: secs[0] ? colorDe.get(secs[0]) : "#ff5f7e", fillOpacity: 1 })
-      .bindPopup(esc(d.nomenclatura)).addTo(marcas);
+      .bindPopup(esc(nomenclatura)).addTo(marcas);
     map.setView(pt, Math.max(map.getZoom(), 16));
 
-    render({ secs, lineas: [`Interpretado: ${d.nomenclatura}`], alternativas: alternativas(res) });
+    render({ secs, lineas: [`Interpretado: ${nomenclatura}`], alternativas: alts });
   }
 
   // Zonas que hay en un radio chico alrededor de un punto (para detectar límites)
@@ -143,7 +242,7 @@
   async function buscarEsquina() {
     const calle = $("#calle").value.trim();
     const cruce = $("#cruce").value.trim();
-    const res = await georef(`${calle} y ${cruce}`, calle);
+    const res = await georefVariantes((a, b) => `${a} y ${b}`, calle, cruce);
     if (!res.length) return mostrarError(`No encontré la esquina "${calle} y ${cruce}". ¿Seguro que esas calles se cruzan? Usá las sugerencias para los nombres.`);
     const d = res[0];
     const pt = [d.ubicacion.lat, d.ubicacion.lon];
@@ -163,11 +262,64 @@
     render({ secs: cerca.length > 1 ? cerca.sort(orden) : secs, limite: cerca.length > 1, lineas: [`Interpretado: ${d.nomenclatura}`], aviso, alternativas: alternativas(res) });
   }
 
+  // ---------- Lugares ----------
+  function filtrarLugares(texto) {
+    const q = norm(texto), toks = q.split(" ").filter(Boolean);
+    if (!toks.length) return [];
+    const rank = (l) => { const n = norm(l.n); return n === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) ? 2 : 3; };
+    return lugares
+      .filter((l) => toks.every((t) => l._q.some((w) => w.startsWith(t))))
+      .sort((a, b) => rank(a) - rank(b) || a.n.localeCompare(b.n, "es"));
+  }
+
+  const zonaTexto = (pt) => {
+    const cerca = zonasAlrededor(pt), dentro = Geo.sectoresDe(pt, sectores);
+    const s = cerca.length > 1 ? cerca : dentro;
+    return s.length ? s.map(nombreDe).sort((a, b) => a.localeCompare(b, "es", { numeric: true })).join(" / ") : "fuera de zonas";
+  };
+
+  async function buscarLugar() {
+    await datosListos;
+    const texto = $("#lugar").value.trim();
+    const m = filtrarLugares(texto);
+    if (!m.length) return mostrarError(`No encontré ningún lugar que coincida con "${texto}". Probá con otra palabra (ej: hospital, terminal, escuela, super) o buscá por dirección.`);
+    const exactos = m.filter((l) => norm(l.n) === norm(texto));
+    if (m.length === 1 || exactos.length === 1) return mostrarLugar(exactos[0] || m[0]);
+
+    // varios resultados: lista con la zona de cada uno
+    marcas.clearLayers();
+    const MAX = 25;
+    m.slice(0, MAX).forEach((l) => L.circleMarker(l.c, { radius: 6, color: "#fff", weight: 1, fillColor: "#ffb000", fillOpacity: 1 }).bindTooltip(esc(l.n)).addTo(marcas));
+    map.fitBounds(L.latLngBounds(m.slice(0, MAX).map((l) => l.c)).pad(0.2), { maxZoom: 16 });
+    $("#resultado").innerHTML = `<div class="res"><div class="meta">${m.length} lugares${m.length > MAX ? ` (se muestran ${MAX})` : ""}. Tocá uno:</div>
+      <ul class="lista-lugares">${m.slice(0, MAX).map((l, i) => `<li><button type="button" data-i="${i}">
+        <span class="ln">${esc(l.n)}</span><span class="lt">${esc(l.t)}${l.d ? " · " + esc(l.d) : ""}</span><span class="lz">${esc(zonaTexto(l.c))}</span>
+      </button></li>`).join("")}</ul></div>`;
+    $("#resultado").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", () => mostrarLugar(m[+b.dataset.i])));
+  }
+
+  function mostrarLugar(l) {
+    const pt = l.c, secs = Geo.sectoresDe(pt, sectores), cerca = zonasAlrededor(pt);
+    marcas.clearLayers();
+    L.circleMarker(pt, { radius: 8, color: "#fff", weight: 2, fillColor: secs[0] ? colorDe.get(secs[0]) : "#ff5f7e", fillOpacity: 1 })
+      .bindPopup(esc(l.n)).addTo(marcas);
+    map.setView(pt, Math.max(map.getZoom(), 16));
+    const limite = cerca.length > 1;
+    const orden = (a, b) => nombreDe(a).localeCompare(nombreDe(b), "es", { numeric: true });
+    render({
+      secs: limite ? cerca.sort(orden) : secs,
+      limite,
+      lineas: [l.n, l.t + (l.d ? ` · ${l.d}` : "")],
+      aviso: limite ? `El lugar está sobre un límite entre ${cerca.length} zonas. Confirmá por qué calle es la entrada.` : null,
+    });
+  }
+
   async function buscarEntre() {
     const calle = $("#calle").value.trim();
     const e1 = $("#entre1").value.trim();
     const e2 = $("#entre2").value.trim();
-    const [r1, r2] = await Promise.all([georef(`${calle} y ${e1}`, calle), georef(`${calle} y ${e2}`, calle)]);
+    const armar = (a, b) => `${a} y ${b}`;
+    const [r1, r2] = await Promise.all([georefVariantes(armar, calle, e1), georefVariantes(armar, calle, e2)]);
     const faltan = [];
     if (!r1.length) faltan.push(`${calle} y ${e1}`);
     if (!r2.length) faltan.push(`${calle} y ${e2}`);

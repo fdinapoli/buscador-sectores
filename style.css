@@ -104,6 +104,27 @@ button:disabled { opacity: .5; cursor: wait; }
 .res .alt button:hover { border-color: var(--accent); color: var(--accent); }
 .hint { color: var(--dim); font-size: 12px; margin-top: 18px; }
 
+.lista-lugares { list-style: none; padding: 0; margin: 8px 0 0; }
+.lista-lugares button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid var(--line);
+  border-top: none;
+  color: var(--fg);
+  font: inherit;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.lista-lugares li:first-child button { border-top: 1px solid var(--line); }
+.lista-lugares button:hover { border-color: var(--accent); }
+.lista-lugares .ln { font-weight: 600; }
+.lista-lugares .lt { grid-column: 1; color: var(--dim); font-size: 12px; }
+.lista-lugares .lz { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--accent); font-weight: 700; text-align: right; }
+
 .aviso {
   border: 1px solid var(--warn);
   color: var(--warn);

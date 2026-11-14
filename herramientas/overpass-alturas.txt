@@ -1,0 +1,3 @@
+[out:json][timeout:120];
+nwr["addr:housenumber"]["addr:street"](-37.42,-59.25,-37.25,-59.03);
+out center tags;

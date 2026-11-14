@@ -14,6 +14,9 @@ Las direcciones se resuelven con la [API Georef](https://datosgobar.github.io/ge
 |---|---|
 | `config.js` | **Tu ciudad** (provincia / partido / localidad), centro del mapa, nombre de la propiedad del sector |
 | `sectores.geojson` | Los polígonos de los sectores (los que vienen son de ejemplo) |
+| `lugares.json` | Hospitales, terminal, escuelas, supermercados, etc. (de OpenStreetMap). Lugares propios: `lugaresExtra` en `config.js` |
+| `alturas.json` | Números de puerta de OpenStreetMap, para calles cuya numeración no tiene Georef |
+| `herramientas/` | Scripts para regenerar zonas, lugares y alturas desde OSM |
 | `editor.html` | Editor para dibujar sectores, importar KML (Google My Maps) / GeoJSON y descargar `sectores.geojson` |
 | `index.html`, `app.js`, `geo.js`, `style.css` | La app |
 

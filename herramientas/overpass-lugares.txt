@@ -1,0 +1,11 @@
+[out:json][timeout:120];
+(
+  nwr["amenity"~"^(hospital|clinic|bus_station|university|college|school|kindergarten|police|fire_station|townhall|courthouse|theatre|cinema|library|marketplace|community_centre|social_facility|place_of_worship|nightclub|events_venue|arts_centre|doctors|fuel)$"]["name"](-37.42,-59.25,-37.25,-59.03);
+  nwr["shop"~"^(supermarket|mall|department_store)$"]["name"](-37.42,-59.25,-37.25,-59.03);
+  nwr["leisure"~"^(stadium|park|sports_centre|golf_course|water_park)$"]["name"](-37.42,-59.25,-37.25,-59.03);
+  nwr["tourism"~"^(hotel|museum|attraction|viewpoint|camp_site|hostel|motel)$"]["name"](-37.42,-59.25,-37.25,-59.03);
+  nwr["aeroway"="aerodrome"]["name"](-37.42,-59.25,-37.25,-59.03);
+  nwr["railway"="station"]["name"](-37.42,-59.25,-37.25,-59.03);
+  nwr["office"="government"]["name"](-37.42,-59.25,-37.25,-59.03);
+);
+out center tags;

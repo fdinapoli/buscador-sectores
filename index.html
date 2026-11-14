@@ -24,13 +24,21 @@
       <div class="tabs" role="tablist">
         <button type="button" role="tab" data-modo="altura" class="active">Altura</button>
         <button type="button" role="tab" data-modo="esquina">Esquina</button>
-        <button type="button" role="tab" data-modo="entre">Entre calles</button>
+        <button type="button" role="tab" data-modo="entre">Entre</button>
+        <button type="button" role="tab" data-modo="lugar">Lugar</button>
       </div>
 
       <form id="form" autocomplete="off">
-        <label>Calle
-          <input id="calle" list="calles" required placeholder="ej: San Martín">
-        </label>
+        <div class="campo-calle">
+          <label>Calle
+            <input id="calle" list="calles" required placeholder="ej: San Martín">
+          </label>
+        </div>
+        <div class="modo-lugar" hidden>
+          <label>Lugar
+            <input id="lugar" list="lugares" placeholder="ej: hospital, terminal, escuela 5">
+          </label>
+        </div>
         <div class="modo-altura">
           <label>Altura
             <input id="altura" type="number" min="0" inputmode="numeric" placeholder="ej: 1250">
@@ -60,6 +68,7 @@
   </main>
 
   <datalist id="calles"></datalist>
+  <datalist id="lugares"></datalist>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="config.js"></script>
