@@ -47,5 +47,16 @@
     return feats.filter((f) => f.geometry && /Polygon$/.test(f.geometry.type));
   }
 
-  window.Geo = { PALETA, contiene, nombre, color, sectoresDe, soloPoligonos };
+  // Borrador del editor, guardado en el navegador (solo lo ve quien lo editó)
+  const CLAVE_BORRADOR = "buscador-sectores:borrador";
+  function leerBorrador() {
+    try {
+      const fc = JSON.parse(localStorage.getItem(CLAVE_BORRADOR));
+      return fc && soloPoligonos(fc).length ? fc : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  window.Geo = { PALETA, contiene, nombre, color, sectoresDe, soloPoligonos, CLAVE_BORRADOR, leerBorrador };
 })();

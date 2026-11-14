@@ -20,8 +20,16 @@
   const colorDe = new Map();
   const nombreDe = (f) => Geo.nombre(f, C.propiedadNombre);
 
-  fetch(C.sectoresUrl, { cache: "no-cache" })
-    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  // Si hay un borrador del editor en este navegador, se usa (salvo ?publicado)
+  const borrador = new URLSearchParams(location.search).has("publicado") ? null : Geo.leerBorrador();
+  if (borrador) {
+    $("#borrador").hidden = false;
+    $("#usar-publicado").addEventListener("click", () => { location.search = "?publicado"; });
+  }
+
+  (borrador
+    ? Promise.resolve(borrador)
+    : fetch(C.sectoresUrl, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }))
     .then((fc) => {
       sectores = Geo.soloPoligonos(fc);
       sectores.forEach((f, i) => colorDe.set(f, Geo.color(f, i)));

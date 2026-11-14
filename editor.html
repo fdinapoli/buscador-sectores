@@ -21,6 +21,8 @@
     .file { display: block; text-align: center; }
     .file input { display: none; }
     .muted { color: var(--dim); font-size: 12px; }
+    #estado.ok { color: var(--accent); }
+    #estado.err { color: var(--err); }
   </style>
 </head>
 <body>
@@ -33,9 +35,14 @@
       <ol>
         <li>Dibujá cada sector con la herramienta de polígono o rectángulo (arriba a la izquierda del mapa).</li>
         <li>También podés importar un <b>KML</b> (ej. exportado de Google My Maps) o un <b>GeoJSON</b>.</li>
-        <li>Poné nombre y color a cada sector en la lista.</li>
-        <li>Descargá <code>sectores.geojson</code> y reemplazalo en el repo.</li>
+        <li>Poné nombre y color a cada sector en la lista. Para mover vértices usá el lápiz y después <b>Save</b> en la barra del mapa.</li>
+        <li>Todo se guarda solo como <b>borrador en este navegador</b> (y el buscador lo usa para que puedas probarlo).</li>
+        <li>Para publicarlo para todos: descargá <code>sectores.geojson</code> y reemplazalo en el repo.</li>
       </ol>
+      <div class="aviso" id="borrador" hidden>
+        <span>Estás viendo tu <b>borrador local</b> (no publicado).</span>
+        <button type="button" id="descartar">Descartar borrador</button>
+      </div>
       <div class="muted" id="estado"></div>
       <ul class="lista" id="lista"></ul>
       <div class="acciones">
@@ -79,26 +86,55 @@
       grupo.addLayer(layer);
     }
 
-    function cargarFC(fc, reemplazar) {
-      if (reemplazar) grupo.clearLayers();
+    function cargarFC(fc, reemplazar, sinGuardar) {
+      if (reemplazar) { grupo.clearLayers(); contador = 0; }
       Geo.soloPoligonos(fc).forEach((f) => {
         L.geoJSON(f).eachLayer((l) => agregar(l, f.properties || {}));
       });
       if (grupo.getLayers().length) map.fitBounds(grupo.getBounds(), { padding: [20, 20] });
-      refrescar();
+      refrescar(sinGuardar);
     }
 
-    function refrescar() {
+    // ---------- Borrador local ----------
+    function serializar() {
+      const features = grupo.getLayers().map((l) => {
+        const f = l.toGeoJSON(6);
+        f.properties = Object.assign({}, l.props);
+        if (C.propiedadNombre && C.propiedadNombre !== "nombre") f.properties[C.propiedadNombre] = l.props.nombre;
+        return f;
+      });
+      return { type: "FeatureCollection", features };
+    }
+
+    function estado(texto, clase) {
+      const el = $("#estado");
+      el.textContent = texto;
+      el.className = "muted " + (clase || "");
+    }
+
+    function guardar() {
+      try {
+        localStorage.setItem(Geo.CLAVE_BORRADOR, JSON.stringify(serializar()));
+        $("#borrador").hidden = false;
+        const hora = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        estado(`${grupo.getLayers().length} sector(es) · borrador guardado ${hora}`, "ok");
+      } catch (e) {
+        estado(`${grupo.getLayers().length} sector(es) · ⚠ no se pudo guardar el borrador (${e.message}). Descargá el archivo para no perder cambios.`, "err");
+      }
+    }
+
+    function refrescar(sinGuardar) {
       const capas = grupo.getLayers();
-      $("#estado").textContent = `${capas.length} sector(es)`;
+      if (sinGuardar) estado(`${capas.length} sector(es)`);
+      else guardar();
       $("#lista").innerHTML = "";
       capas.forEach((l) => {
         const li = document.createElement("li");
         const color = Object.assign(document.createElement("input"), { type: "color", value: l.props.color });
         const nombre = Object.assign(document.createElement("input"), { type: "text", value: l.props.nombre });
         const borrar = Object.assign(document.createElement("button"), { type: "button", textContent: "✕", title: "Borrar" });
-        color.oninput = () => { l.props.color = color.value; l.setStyle({ color: color.value }); };
-        nombre.oninput = () => { l.props.nombre = nombre.value; };
+        color.oninput = () => { l.props.color = color.value; l.setStyle({ color: color.value }); guardar(); };
+        nombre.oninput = () => { l.props.nombre = nombre.value; guardar(); };
         nombre.onfocus = () => map.fitBounds(l.getBounds(), { padding: [40, 40], maxZoom: 16 });
         borrar.onclick = () => { if (confirm(`¿Borrar "${l.props.nombre}"?`)) { grupo.removeLayer(l); refrescar(); } };
         li.append(color, nombre, borrar);
@@ -107,7 +143,8 @@
     }
 
     map.on(L.Draw.Event.CREATED, (e) => { agregar(e.layer, {}); refrescar(); });
-    map.on(L.Draw.Event.DELETED, refrescar);
+    map.on(L.Draw.Event.DELETED, () => refrescar());
+    map.on(L.Draw.Event.EDITED, () => guardar());
 
     $("#archivo").addEventListener("change", async (ev) => {
       const file = ev.target.files[0];
@@ -128,22 +165,36 @@
     });
 
     $("#descargar").addEventListener("click", () => {
-      const features = grupo.getLayers().map((l) => {
-        const f = l.toGeoJSON(6);
-        f.properties = Object.assign({}, l.props);
-        if (C.propiedadNombre && C.propiedadNombre !== "nombre") f.properties[C.propiedadNombre] = l.props.nombre;
-        return f;
-      });
-      const blob = new Blob([JSON.stringify({ type: "FeatureCollection", features }, null, 2)], { type: "application/geo+json" });
+      const blob = new Blob([JSON.stringify(serializar(), null, 2)], { type: "application/geo+json" });
       const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "sectores.geojson" });
+      document.body.append(a);
       a.click();
+      a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     });
 
-    fetch(C.sectoresUrl, { cache: "no-cache" })
-      .then((r) => r.json())
-      .then((fc) => cargarFC(fc, true))
-      .catch(() => refrescar());
+    function cargarPublicado() {
+      fetch(C.sectoresUrl, { cache: "no-cache" })
+        .then((r) => r.json())
+        .then((fc) => cargarFC(fc, true, true))
+        .catch(() => refrescar(true));
+    }
+
+    $("#descartar").addEventListener("click", () => {
+      if (!confirm("¿Descartar el borrador y volver a los sectores publicados? Los cambios no descargados se pierden.")) return;
+      try { localStorage.removeItem(Geo.CLAVE_BORRADOR); } catch (_) {}
+      $("#borrador").hidden = true;
+      cargarPublicado();
+    });
+
+    const borrador = Geo.leerBorrador();
+    if (borrador) {
+      $("#borrador").hidden = false;
+      cargarFC(borrador, true, true);
+      estado(`${grupo.getLayers().length} sector(es) · borrador recuperado`, "ok");
+    } else {
+      cargarPublicado();
+    }
   })();
   </script>
 </body>

@@ -11,6 +11,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg);
@@ -102,6 +103,24 @@ button:disabled { opacity: .5; cursor: wait; }
 }
 .res .alt button:hover { border-color: var(--accent); color: var(--accent); }
 .hint { color: var(--dim); font-size: 12px; margin-top: 18px; }
+
+.aviso {
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  padding: 8px 10px;
+  margin: 0 0 14px;
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.aviso a { color: var(--warn); }
+.aviso button {
+  background: none; border: 1px solid var(--warn); color: var(--warn);
+  font: inherit; padding: 3px 8px; cursor: pointer;
+}
+.aviso button:hover { background: var(--warn); color: var(--bg); }
 
 /* Leaflet dark */
 .leaflet-container { font-family: var(--font); }
