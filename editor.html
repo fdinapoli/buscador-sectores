@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editor de sectores</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .panel ol { padding-left: 18px; color: var(--dim); font-size: 12px; }
+    .panel ol li { margin-bottom: 6px; }
+    .lista { list-style: none; padding: 0; margin: 12px 0; }
+    .lista li { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .lista input[type=text] { margin: 0; padding: 6px 8px; font-size: 13px; }
+    .lista input[type=color] { width: 34px; height: 32px; padding: 0; margin: 0; border: 1px solid var(--line); background: none; flex: none; }
+    .lista button { background: none; border: 1px solid var(--line); color: var(--err); font: inherit; cursor: pointer; padding: 5px 8px; flex: none; }
+    .acciones { display: grid; gap: 8px; margin-top: 12px; }
+    .file { display: block; text-align: center; }
+    .file input { display: none; }
+    .muted { color: var(--dim); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>&gt; Editor de sectores<span class="cursor">_</span></h1>
+    <a href="index.html" class="link">[ volver al buscador ]</a>
+  </header>
+  <main>
+    <section class="panel">
+      <ol>
+        <li>Dibujá cada sector con la herramienta de polígono o rectángulo (arriba a la izquierda del mapa).</li>
+        <li>También podés importar un <b>KML</b> (ej. exportado de Google My Maps) o un <b>GeoJSON</b>.</li>
+        <li>Poné nombre y color a cada sector en la lista.</li>
+        <li>Descargá <code>sectores.geojson</code> y reemplazalo en el repo.</li>
+      </ol>
+      <div class="muted" id="estado"></div>
+      <ul class="lista" id="lista"></ul>
+      <div class="acciones">
+        <label class="btn file">Importar KML / GeoJSON<input type="file" id="archivo" accept=".kml,.geojson,.json"></label>
+        <button class="btn" id="descargar" type="button">Descargar sectores.geojson</button>
+      </div>
+    </section>
+    <div id="map"></div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
+  <script src="config.js"></script>
+  <script src="geo.js"></script>
+  <script>
+  (function () {
+    const C = window.CONFIG;
+    const $ = (s) => document.querySelector(s);
+    const map = L.map("map").setView(C.mapa.centro, C.mapa.zoom);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    const grupo = new L.FeatureGroup().addTo(map);
+    map.addControl(new L.Control.Draw({
+      edit: { featureGroup: grupo },
+      draw: { polyline: false, circle: false, circlemarker: false, marker: false,
+              polygon: { allowIntersection: false, showArea: false }, rectangle: { showArea: false } },
+    }));
+
+    let contador = 0;
+    function agregar(layer, props) {
+      layer.props = Object.assign({}, props);
+      if (!layer.props.nombre) layer.props.nombre = Geo.nombre({ properties: props }, C.propiedadNombre);
+      if (layer.props.nombre === "(sin nombre)") layer.props.nombre = `Sector ${grupo.getLayers().length + 1}`;
+      if (!layer.props.color) layer.props.color = Geo.PALETA[contador % Geo.PALETA.length];
+      contador++;
+      layer.setStyle({ color: layer.props.color, weight: 2, fillOpacity: 0.15 });
+      grupo.addLayer(layer);
+    }
+
+    function cargarFC(fc, reemplazar) {
+      if (reemplazar) grupo.clearLayers();
+      Geo.soloPoligonos(fc).forEach((f) => {
+        L.geoJSON(f).eachLayer((l) => agregar(l, f.properties || {}));
+      });
+      if (grupo.getLayers().length) map.fitBounds(grupo.getBounds(), { padding: [20, 20] });
+      refrescar();
+    }
+
+    function refrescar() {
+      const capas = grupo.getLayers();
+      $("#estado").textContent = `${capas.length} sector(es)`;
+      $("#lista").innerHTML = "";
+      capas.forEach((l) => {
+        const li = document.createElement("li");
+        const color = Object.assign(document.createElement("input"), { type: "color", value: l.props.color });
+        const nombre = Object.assign(document.createElement("input"), { type: "text", value: l.props.nombre });
+        const borrar = Object.assign(document.createElement("button"), { type: "button", textContent: "✕", title: "Borrar" });
+        color.oninput = () => { l.props.color = color.value; l.setStyle({ color: color.value }); };
+        nombre.oninput = () => { l.props.nombre = nombre.value; };
+        nombre.onfocus = () => map.fitBounds(l.getBounds(), { padding: [40, 40], maxZoom: 16 });
+        borrar.onclick = () => { if (confirm(`¿Borrar "${l.props.nombre}"?`)) { grupo.removeLayer(l); refrescar(); } };
+        li.append(color, nombre, borrar);
+        $("#lista").append(li);
+      });
+    }
+
+    map.on(L.Draw.Event.CREATED, (e) => { agregar(e.layer, {}); refrescar(); });
+    map.on(L.Draw.Event.DELETED, refrescar);
+
+    $("#archivo").addEventListener("change", async (ev) => {
+      const file = ev.target.files[0];
+      if (!file) return;
+      const texto = await file.text();
+      try {
+        const fc = /\.kml$/i.test(file.name)
+          ? toGeoJSON.kml(new DOMParser().parseFromString(texto, "text/xml"))
+          : JSON.parse(texto);
+        const n = Geo.soloPoligonos(fc).length;
+        if (!n) return alert("El archivo no tiene polígonos.");
+        const reemplazar = grupo.getLayers().length ? confirm(`Se encontraron ${n} polígono(s).\nAceptar = reemplazar los actuales · Cancelar = agregarlos`) : true;
+        cargarFC(fc, reemplazar);
+      } catch (e) {
+        alert("No se pudo leer el archivo: " + e.message);
+      }
+      ev.target.value = "";
+    });
+
+    $("#descargar").addEventListener("click", () => {
+      const features = grupo.getLayers().map((l) => {
+        const f = l.toGeoJSON(6);
+        f.properties = Object.assign({}, l.props);
+        if (C.propiedadNombre && C.propiedadNombre !== "nombre") f.properties[C.propiedadNombre] = l.props.nombre;
+        return f;
+      });
+      const blob = new Blob([JSON.stringify({ type: "FeatureCollection", features }, null, 2)], { type: "application/geo+json" });
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "sectores.geojson" });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+
+    fetch(C.sectoresUrl, { cache: "no-cache" })
+      .then((r) => r.json())
+      .then((fc) => cargarFC(fc, true))
+      .catch(() => refrescar());
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buscador de sectores</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>&gt; <span id="titulo">Buscador de sectores</span><span class="cursor">_</span></h1>
+    <a href="editor.html" class="link">[ editor de sectores ]</a>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-modo="altura" class="active">Calle + altura</button>
+        <button type="button" role="tab" data-modo="entre">Calle entre calles</button>
+      </div>
+
+      <form id="form" autocomplete="off">
+        <label>Calle
+          <input id="calle" list="calles" required placeholder="ej: San Martín">
+        </label>
+        <div class="modo-altura">
+          <label>Altura
+            <input id="altura" type="number" min="0" inputmode="numeric" placeholder="ej: 1250">
+          </label>
+        </div>
+        <div class="modo-entre" hidden>
+          <label>Entre
+            <input id="entre1" list="calles" placeholder="primera calle">
+          </label>
+          <label>y
+            <input id="entre2" list="calles" placeholder="segunda calle">
+          </label>
+        </div>
+        <button type="submit" id="buscar">Buscar</button>
+      </form>
+
+      <div id="resultado" aria-live="polite"></div>
+      <p class="hint">Tip: tocá cualquier punto del mapa para ver su sector.</p>
+    </section>
+
+    <div id="map"></div>
+  </main>
+
+  <datalist id="calles"></datalist>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="config.js"></script>
+  <script src="geo.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

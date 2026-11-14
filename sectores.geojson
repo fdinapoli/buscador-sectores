@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "nombre": "Sector 1 (demo)", "color": "#39ff88" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-59.165, -37.330], [-59.105, -37.330], [-59.105, -37.300],
+          [-59.165, -37.300], [-59.165, -37.330]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "nombre": "Sector 2 (demo)", "color": "#ffb000" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-59.165, -37.360], [-59.105, -37.360], [-59.105, -37.330],
+          [-59.165, -37.330], [-59.165, -37.360]
+        ]]
+      }
+    }
+  ]
+}
