@@ -225,7 +225,7 @@
       .bindPopup(esc(nomenclatura)).addTo(marcas);
     map.setView(pt, Math.max(map.getZoom(), 16));
 
-    render({ secs, lineas: [`Interpretado: ${nomenclatura}`], alternativas: alts });
+    render({ secs, lineas: [`Interpretado: ${nomenclatura}`], alternativas: alts, destino: pt });
   }
 
   // Zonas que hay en un radio chico alrededor de un punto (para detectar límites)
@@ -259,7 +259,7 @@
       aviso = `La esquina está sobre un límite entre ${cerca.length} zonas. Confirmá de qué lado de la calle es el viaje.`;
     }
     const orden = (a, b) => nombreDe(a).localeCompare(nombreDe(b), "es", { numeric: true });
-    render({ secs: cerca.length > 1 ? cerca.sort(orden) : secs, limite: cerca.length > 1, lineas: [`Interpretado: ${d.nomenclatura}`], aviso, alternativas: alternativas(res) });
+    render({ secs: cerca.length > 1 ? cerca.sort(orden) : secs, limite: cerca.length > 1, lineas: [`Interpretado: ${d.nomenclatura}`], aviso, alternativas: alternativas(res), destino: pt });
   }
 
   // ---------- Lugares ----------
@@ -311,6 +311,7 @@
       limite,
       lineas: [l.n, l.t + (l.d ? ` · ${l.d}` : "")],
       aviso: limite ? `El lugar está sobre un límite entre ${cerca.length} zonas. Confirmá por qué calle es la entrada.` : null,
+      destino: pt,
     });
   }
 
@@ -355,7 +356,7 @@
       aviso = `El tramo cruza un límite: esquina 1 → ${desc(sa)}, esquina 2 → ${desc(sb)}. Se muestra el sector del punto medio.`;
     }
     if (metros > 400) aviso = (aviso ? aviso + " " : "") + "Ojo: las esquinas están a más de 400 m, puede que no sean cuadras consecutivas.";
-    render({ secs: sm, lineas, aviso, alternativas: alternativas(r1.concat(r2)) });
+    render({ secs: sm, lineas, aviso, alternativas: alternativas(r1.concat(r2)), destino: pm });
   }
 
   function alternativas(res) {
@@ -363,7 +364,17 @@
     return [...new Set(res.map((d) => d.calle.nombre))].filter((n) => n !== principal);
   }
 
-  function render({ secs, limite = false, lineas = [], aviso, alternativas = [] }) {
+  // Botones para abrir la navegación en Google Maps / Waze
+  function botonesNav(pt) {
+    if (!pt) return "";
+    const [lat, lon] = pt.map((x) => x.toFixed(6));
+    return `<div class="nav">
+      <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=driving" target="_blank" rel="noopener">▶ Google Maps</a>
+      <a href="https://waze.com/ul?ll=${lat},${lon}&navigate=yes" target="_blank" rel="noopener">▶ Waze</a>
+    </div>`;
+  }
+
+  function render({ secs, limite = false, lineas = [], aviso, alternativas = [], destino }) {
     let html = '<div class="res">';
     if (!secs.length) {
       html += `<div class="sector" style="color:var(--err)">Fuera de todos los sectores</div>`;
@@ -373,6 +384,7 @@
     }
     html += `<div class="meta">${lineas.map((l) => `<div>${esc(l)}</div>`).join("")}</div>`;
     if (aviso) html += `<div class="warn">⚠ ${esc(aviso)}</div>`;
+    html += botonesNav(destino);
     if (alternativas.length) {
       html += `<div class="alt">¿Era otra calle? ${alternativas.map((n) => `<button type="button" data-calle="${esc(n)}">${esc(n)}</button>`).join("")}</div>`;
     }
@@ -385,6 +397,96 @@
   function mostrarError(msg) {
     $("#resultado").innerHTML = `<div class="res err">${esc(msg)}</div>`;
   }
+
+  // ---------- GPS: mi ubicación y seguimiento ----------
+  const capaGps = L.layerGroup().addTo(map);
+  let watchId = null, wakeLock = null, zonaActual = null, primeraVez = true;
+
+  function pintarGps(pos) {
+    const pt = [pos.coords.latitude, pos.coords.longitude];
+    const acc = Math.round(pos.coords.accuracy);
+    const secs = Geo.sectoresDe(pt, sectores);
+    const cerca = zonasAlrededor(pt, Math.max(25, Math.min(acc, 100))).filter((f) => !secs.includes(f));
+
+    capaGps.clearLayers();
+    L.circle(pt, { radius: acc, color: "#4dd0ff", weight: 1, fillOpacity: 0.08, interactive: false }).addTo(capaGps);
+    L.circleMarker(pt, { radius: 7, color: "#fff", weight: 2, fillColor: "#4dd0ff", fillOpacity: 1, interactive: false }).addTo(capaGps);
+    if (primeraVez || !map.getBounds().pad(-0.15).contains(pt)) map.setView(pt, primeraVez ? Math.max(map.getZoom(), 16) : map.getZoom());
+    primeraVez = false;
+
+    const nombre = secs.length ? secs.map(nombreDe).join(" / ") : "Fuera de zonas";
+    const caja = $("#gps");
+    if (watchId !== null && zonaActual !== null && nombre !== zonaActual) {
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      caja.classList.remove("cambio"); void caja.offsetWidth; caja.classList.add("cambio");
+    }
+    const anterior = watchId !== null && zonaActual !== null && nombre !== zonaActual ? zonaActual : null;
+    zonaActual = nombre;
+
+    const col = secs[0] ? colorDe.get(secs[0]) : "var(--err)";
+    let html = `<div class="sector"><span class="sw" style="background:${esc(col)};color:${esc(col)}"></span>${esc(nombre)}</div>`;
+    html += `<div class="meta"><div>Estás acá · precisión ±${acc} m${watchId !== null ? " · siguiendo" : ""}</div>`;
+    if (anterior) html += `<div>Entraste desde ${esc(anterior)}</div>`;
+    html += "</div>";
+    if (acc > 60) html += `<div class="warn">⚠ Precisión baja: activá el GPS del celular o esperá unos segundos al aire libre.</div>`;
+    else if (cerca.length) html += `<div class="warn">⚠ Cerca del límite con ${esc(cerca.map(nombreDe).join(", "))}.</div>`;
+    caja.innerHTML = html;
+    caja.hidden = false;
+  }
+
+  function errorGps(e) {
+    const msg = {
+      1: "No diste permiso de ubicación. Habilitalo para este sitio en la configuración del navegador (el candado al lado de la dirección).",
+      2: "No se pudo obtener la ubicación. Revisá que el GPS / ubicación del celular esté activado.",
+      3: "La ubicación tardó demasiado. Probá de nuevo.",
+    }[e.code] || "Error de ubicación: " + e.message;
+    $("#gps").innerHTML = `<div class="warn">⚠ ${esc(msg)}</div>`;
+    $("#gps").hidden = false;
+    if (e.code === 1) dejarDeSeguir();
+  }
+
+  const OPC_GPS = { enableHighAccuracy: true, timeout: 20000, maximumAge: 3000 };
+
+  $("#btn-ubicacion").addEventListener("click", () => {
+    if (!navigator.geolocation) return errorGps({ code: 0, message: "este navegador no tiene GPS" });
+    const btn = $("#btn-ubicacion");
+    btn.disabled = true;
+    btn.textContent = "📍 Buscando…";
+    primeraVez = true;
+    navigator.geolocation.getCurrentPosition(
+      (p) => { pintarGps(p); btn.disabled = false; btn.textContent = "📍 Mi ubicación"; },
+      (e) => { errorGps(e); btn.disabled = false; btn.textContent = "📍 Mi ubicación"; },
+      OPC_GPS
+    );
+  });
+
+  async function pedirPantallaEncendida() {
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (_) {}
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (watchId !== null && document.visibilityState === "visible") pedirPantallaEncendida();
+  });
+
+  function dejarDeSeguir() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    zonaActual = null;
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    $("#btn-seguir").classList.remove("on");
+    $("#btn-seguir").textContent = "Seguir";
+  }
+
+  $("#btn-seguir").addEventListener("click", () => {
+    if (watchId !== null) return dejarDeSeguir();
+    if (!navigator.geolocation) return errorGps({ code: 0, message: "este navegador no tiene GPS" });
+    primeraVez = true;
+    watchId = navigator.geolocation.watchPosition(pintarGps, errorGps, OPC_GPS);
+    $("#btn-seguir").classList.add("on");
+    $("#btn-seguir").textContent = "■ Parar";
+    $("#gps").hidden = false;
+    $("#gps").innerHTML = `<div class="meta">Buscando ubicación…</div>`;
+    pedirPantallaEncendida();
+  });
 
   // ---------- Click en el mapa ----------
   map.on("click", (e) => {

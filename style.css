@@ -104,6 +104,27 @@ button:disabled { opacity: .5; cursor: wait; }
 .res .alt button:hover { border-color: var(--accent); color: var(--accent); }
 .hint { color: var(--dim); font-size: 12px; margin-top: 18px; }
 
+/* GPS */
+.gps-bar { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-bottom: 10px; }
+.gps-bar button {
+  background: transparent; color: #4dd0ff; border: 1px solid #4dd0ff;
+  font: 600 14px var(--font); padding: 9px 12px; cursor: pointer;
+}
+.gps-bar button:hover { background: #4dd0ff22; }
+.gps-bar button.on { background: #4dd0ff; color: var(--bg); }
+.gps-bar button:disabled { opacity: .6; cursor: wait; }
+.res.gps { margin-bottom: 14px; border-color: #4dd0ff; }
+.res.gps.cambio { animation: cambio 1.2s ease-out 2; }
+@keyframes cambio { 0% { background: #4dd0ff55; } 100% { background: transparent; } }
+
+/* Botones de navegación */
+.nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
+.nav a {
+  text-align: center; text-decoration: none; padding: 9px 6px;
+  border: 1px solid var(--line); color: var(--fg); font-weight: 600; font-size: 13px;
+}
+.nav a:hover { border-color: var(--accent); color: var(--accent); }
+
 .lista-lugares { list-style: none; padding: 0; margin: 8px 0 0; }
 .lista-lugares button {
   display: grid;
