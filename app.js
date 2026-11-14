@@ -86,8 +86,10 @@
       modo = b.dataset.modo;
       document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
       $(".modo-altura").hidden = modo !== "altura";
+      $(".modo-esquina").hidden = modo !== "esquina";
       $(".modo-entre").hidden = modo !== "entre";
       $("#altura").required = modo === "altura";
+      $("#cruce").required = modo === "esquina";
       $("#entre1").required = $("#entre2").required = modo === "entre";
     })
   );
@@ -100,6 +102,7 @@
     btn.textContent = "Buscando…";
     try {
       if (modo === "altura") await buscarAltura();
+      else if (modo === "esquina") await buscarEsquina();
       else await buscarEntre();
     } catch (e) {
       mostrarError("Error consultando el servicio de direcciones: " + e.message);
@@ -124,6 +127,40 @@
     map.setView(pt, Math.max(map.getZoom(), 16));
 
     render({ secs, lineas: [`Interpretado: ${d.nomenclatura}`], alternativas: alternativas(res) });
+  }
+
+  // Zonas que hay en un radio chico alrededor de un punto (para detectar límites)
+  function zonasAlrededor(pt, radio = 25) {
+    const dLat = radio / 110540, dLon = radio / (111320 * Math.cos((pt[0] * Math.PI) / 180));
+    const set = new Set();
+    for (let k = 0; k < 8; k++) {
+      const a = (k * Math.PI) / 4;
+      Geo.sectoresDe([pt[0] + dLat * Math.sin(a), pt[1] + dLon * Math.cos(a)], sectores).forEach((f) => set.add(f));
+    }
+    return [...set];
+  }
+
+  async function buscarEsquina() {
+    const calle = $("#calle").value.trim();
+    const cruce = $("#cruce").value.trim();
+    const res = await georef(`${calle} y ${cruce}`, calle);
+    if (!res.length) return mostrarError(`No encontré la esquina "${calle} y ${cruce}". ¿Seguro que esas calles se cruzan? Usá las sugerencias para los nombres.`);
+    const d = res[0];
+    const pt = [d.ubicacion.lat, d.ubicacion.lon];
+    const secs = Geo.sectoresDe(pt, sectores);
+    const cerca = zonasAlrededor(pt);
+
+    marcas.clearLayers();
+    L.circleMarker(pt, { radius: 8, color: "#fff", weight: 2, fillColor: secs[0] ? colorDe.get(secs[0]) : "#ff5f7e", fillOpacity: 1 })
+      .bindPopup(esc(d.nomenclatura)).addTo(marcas);
+    map.setView(pt, Math.max(map.getZoom(), 17));
+
+    let aviso = null;
+    if (cerca.length > 1) {
+      aviso = `La esquina está sobre un límite entre ${cerca.length} zonas. Confirmá de qué lado de la calle es el viaje.`;
+    }
+    const orden = (a, b) => nombreDe(a).localeCompare(nombreDe(b), "es", { numeric: true });
+    render({ secs: cerca.length > 1 ? cerca.sort(orden) : secs, limite: cerca.length > 1, lineas: [`Interpretado: ${d.nomenclatura}`], aviso, alternativas: alternativas(res) });
   }
 
   async function buscarEntre() {
@@ -174,13 +211,13 @@
     return [...new Set(res.map((d) => d.calle.nombre))].filter((n) => n !== principal);
   }
 
-  function render({ secs, lineas = [], aviso, alternativas = [] }) {
+  function render({ secs, limite = false, lineas = [], aviso, alternativas = [] }) {
     let html = '<div class="res">';
     if (!secs.length) {
       html += `<div class="sector" style="color:var(--err)">Fuera de todos los sectores</div>`;
     } else {
       html += secs.map((f) => `<div class="sector"><span class="sw" style="background:${esc(colorDe.get(f))};color:${esc(colorDe.get(f))}"></span>${esc(nombreDe(f))}</div>`).join("");
-      if (secs.length > 1) aviso = (aviso ? aviso + " " : "") + "El punto cae en más de un sector (los polígonos se superponen).";
+      if (secs.length > 1 && !limite) aviso = (aviso ? aviso + " " : "") + "El punto cae en más de un sector (los polígonos se superponen).";
     }
     html += `<div class="meta">${lineas.map((l) => `<div>${esc(l)}</div>`).join("")}</div>`;
     if (aviso) html += `<div class="warn">⚠ ${esc(aviso)}</div>`;

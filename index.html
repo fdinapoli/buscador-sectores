@@ -22,8 +22,9 @@
         <button type="button" id="usar-publicado">Ver publicado</button>
       </div>
       <div class="tabs" role="tablist">
-        <button type="button" role="tab" data-modo="altura" class="active">Calle + altura</button>
-        <button type="button" role="tab" data-modo="entre">Calle entre calles</button>
+        <button type="button" role="tab" data-modo="altura" class="active">Altura</button>
+        <button type="button" role="tab" data-modo="esquina">Esquina</button>
+        <button type="button" role="tab" data-modo="entre">Entre calles</button>
       </div>
 
       <form id="form" autocomplete="off">
@@ -33,6 +34,11 @@
         <div class="modo-altura">
           <label>Altura
             <input id="altura" type="number" min="0" inputmode="numeric" placeholder="ej: 1250">
+          </label>
+        </div>
+        <div class="modo-esquina" hidden>
+          <label>Esquina
+            <input id="cruce" list="calles" placeholder="ej: Pinto">
           </label>
         </div>
         <div class="modo-entre" hidden>
