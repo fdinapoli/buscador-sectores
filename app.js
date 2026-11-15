@@ -97,13 +97,23 @@
     $("#calles").innerHTML = nombres.map((n) => `<option value="${esc(n)}">`).join("");
   })();
 
+  // Calles de alturas.json que corresponden al nombre escrito. Si no hay coincidencia exacta, se prefieren
+  // las de menos palabras de más: "Santamarina" es "Avenida Santamarina", no "Av. Ana Irasusta de Santamarina".
+  function callesOsm(calle) {
+    const nombres = Object.keys(alturas.calles);
+    const exactas = nombres.filter((k) => norm(k) === norm(calle));
+    if (exactas.length) return exactas;
+    const parecidas = nombres.filter((k) => mismaCalle(k, calle));
+    const extra = (k) => Math.abs(sig(k).length - sig(calle).length);
+    const min = Math.min(...parecidas.map(extra));
+    return parecidas.filter((k) => extra(k) === min);
+  }
+
   // Interpolar una altura con los números de puerta de OSM
   function osmAltura(calle, altura) {
     const n = parseInt(altura, 10);
     if (!alturas || !Number.isFinite(n)) return null;
-    const nombres = Object.keys(alturas.calles);
-    let cands = nombres.filter((k) => norm(k) === norm(calle));
-    if (!cands.length) cands = nombres.filter((k) => mismaCalle(k, calle));
+    const cands = callesOsm(calle);
     const metros = (a, b) => Math.hypot(a.lat - b.lat, (a.lon - b.lon) * 0.795) * 111000;
     let mejor = null;
     for (const k of cands) {
@@ -189,53 +199,86 @@
   const aXY = (p, o) => [(p[1] - o[1]) * 111320 * COS, (p[0] - o[0]) * 110540];   // metros [este, norte] desde o
   const deXY = (v, o) => [o[0] + v[1] / 110540, o[1] + v[0] / (111320 * COS)];
 
-  // Con los números de puerta de OSM cercanos: hacia dónde crece la numeración y de qué lado van los pares
-  function geometriaMano(calle, altura, pt) {
-    if (!alturas) return null;
+  // Segmentos de borde de zona cerca de un punto, en metros relativos al punto
+  function bordesCerca(pt, radio) {
+    const res = [];
+    for (const f of sectores) {
+      const g = f.geometry, polis = g.type === "Polygon" ? [g.coordinates] : g.coordinates;
+      for (const rings of polis) for (const ring of rings) for (let i = 0; i < ring.length - 1; i++) {
+        const a = aXY([ring[i][1], ring[i][0]], pt), b = aXY([ring[i + 1][1], ring[i + 1][0]], pt);
+        const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+        if (!l2) continue;
+        const t = Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / l2));
+        const q = [a[0] + t * dx, a[1] + t * dy], d = Math.hypot(q[0], q[1]);
+        if (d <= radio) { const l = Math.sqrt(l2); res.push({ q, d, u: [dx / l, dy / l] }); }
+      }
+    }
+    return res;
+  }
+
+  // Números de puerta de OSM de esa calle cerca del punto: [{n, v:[x,y] en metros}]
+  function puertasCerca(calle, altura, pt) {
+    if (!alturas) return [];
     const n = parseInt(altura, 10);
-    const nombres = Object.keys(alturas.calles);
-    let cands = nombres.filter((k) => norm(k) === norm(calle));
-    if (!cands.length) cands = nombres.filter((k) => mismaCalle(k, calle));
-    let mejor = null;
+    const cands = callesOsm(calle);
+    let mejor = [];
     for (const k of cands) {
       const a = alturas.calles[k], pts = [];
       for (let i = 0; i < a.length; i += 3) {
         const v = aXY([alturas.base[0] + a[i + 1] / 1e5, alturas.base[1] + a[i + 2] / 1e5], pt);
         if (Math.hypot(v[0], v[1]) < 250 && Math.abs(a[i] - n) <= 250) pts.push({ n: a[i], v });
       }
-      const pares = pts.filter((p) => p.n % 2 === 0), impares = pts.filter((p) => p.n % 2 === 1);
-      if (pts.length < 3 || !pares.length || !impares.length) continue;
-      // dirección de numeración creciente (regresión posición ~ número)
-      const media = pts.reduce((s, p) => s + p.n, 0) / pts.length;
-      let dx = 0, dy = 0;
-      for (const p of pts) { dx += (p.n - media) * p.v[0]; dy += (p.n - media) * p.v[1]; }
-      const largo = Math.hypot(dx, dy);
-      if (!largo) continue;
-      const dir = [dx / largo, dy / largo], izq = [-dir[1], dir[0]];
-      const desvio = (g) => g.reduce((s, p) => s + p.v[0] * izq[0] + p.v[1] * izq[1], 0) / g.length;
-      const oPar = desvio(pares), oImpar = desvio(impares);
-      if (Math.abs(oPar - oImpar) < 4) continue; // no se distinguen las veredas
-      const r = { calle: k, dir, izq, paresIzq: oPar > oImpar, centro: (oPar + oImpar) / 2, cant: pts.length };
-      if (!mejor || r.cant > mejor.cant) mejor = r;
+      if (pts.length > mejor.length) mejor = pts;
     }
     return mejor;
   }
 
-  // Si el punto está sobre una calle límite, decide la zona según la mano (par / impar) de la altura
+  // Si la dirección está sobre una calle límite, decide la zona según la mano (par / impar).
+  // El borde de zona sigue el eje de la calle: se mide de qué lado del borde quedan los pares
+  // (con los números de puerta cercanos) y se toma la zona de ese lado.
   function resolverMano(calle, altura, pt) {
     const cerca = zonasAlrededor(pt, 30);
-    if (cerca.length < 2) return null;
-    const g = geometriaMano(calle, altura, pt);
-    if (!g) return { cerca };
-    const par = parseInt(altura, 10) % 2 === 0;
-    const izquierda = par === g.paresIzq;
+    const pts = puertasCerca(calle, altura, pt);
+    const n = parseInt(altura, 10);
+    // dirección en que crece la numeración (regresión posición ~ número)
+    let dir = null;
+    if (pts.length >= 2) {
+      const media = pts.reduce((s, p) => s + p.n, 0) / pts.length;
+      let dx = 0, dy = 0;
+      for (const p of pts) { dx += (p.n - media) * p.v[0]; dy += (p.n - media) * p.v[1]; }
+      const l = Math.hypot(dx, dy);
+      if (l) dir = [dx / l, dy / l];
+    }
+    if (!dir) return cerca.length >= 2 ? { cerca } : null;
+    // borde paralelo a la calle más cercano (descarta los bordes que la cruzan)
+    const paralelo = (b) => Math.abs(b.u[0] * dir[0] + b.u[1] * dir[1]) > 0.8;
+    const borde = bordesCerca(pt, 45).filter(paralelo).sort((a, b) => a.d - b.d)[0];
+    if (!borde) return cerca.length >= 2 ? { cerca } : null;
+    const u = borde.u[0] * dir[0] + borde.u[1] * dir[1] > 0 ? borde.u : [-borde.u[0], -borde.u[1]];
+    const izq = [-u[1], u[0]];
+    // de qué lado del borde quedan pares e impares (mediana de la distancia con signo)
+    const lado = (p) => {
+      const b = bordesCerca(deXY(p.v, pt), 60).filter(paralelo).sort((a, c) => a.d - c.d)[0];
+      return b ? -(b.q[0] * izq[0] + b.q[1] * izq[1]) : null;
+    };
+    const med = (a) => { const s = a.filter((x) => x != null).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
+    const oPar = med(pts.filter((p) => p.n % 2 === 0).map(lado)), oImpar = med(pts.filter((p) => p.n % 2 === 1).map(lado));
+    let paresIzq;
+    if (oPar != null && oImpar != null && Math.abs(oPar - oImpar) >= 4) paresIzq = oPar > oImpar;
+    else if (oPar != null && Math.abs(oPar) >= 3) paresIzq = oPar > 0;
+    else if (oImpar != null && Math.abs(oImpar) >= 3) paresIzq = oImpar < 0;
+    else return cerca.length >= 2 ? { cerca } : null;
+    const par = n % 2 === 0;
+    const izquierda = par === paresIzq;
     const s = izquierda ? 1 : -1;
-    // además, correrse unos metros hacia adentro de la cuadra (el 800 está al principio de la cuadra del 800,
-    // el 899 al final): resuelve las alturas que caen justo en una esquina con otra calle límite
-    const adentro = (parseInt(altura, 10) % 100 < 50 ? 1 : -1) * 12;
-    const vereda = (d) => deXY([g.izq[0] * (g.centro + d) + g.dir[0] * adentro, g.izq[1] * (g.centro + d) + g.dir[1] * adentro], pt);
-    const pMano = vereda(s * 15), pEnfrente = vereda(-s * 15);
-    return { cerca, par, izquierda, pMano, zMano: Geo.sectoresDe(pMano, sectores), zEnfrente: Geo.sectoresDe(pEnfrente, sectores) };
+    // correrse hacia adentro de la cuadra (el 800 está al principio de la cuadra del 800, el 899 al final),
+    // por si la altura cae justo en una esquina con otra calle límite
+    const adentro = (n % 100 < 50 ? 1 : -1) * 15;
+    const punto = (d) => deXY([borde.q[0] + u[0] * adentro + izq[0] * d, borde.q[1] + u[1] * adentro + izq[1] * d], pt);
+    const pMano = punto(s * 20), pEnfrente = punto(-s * 20);
+    const zMano = Geo.sectoresDe(pMano, sectores), zEnfrente = Geo.sectoresDe(pEnfrente, sectores);
+    if (zMano.length !== 1 || zEnfrente.length !== 1 || zMano[0] === zEnfrente[0]) return cerca.length >= 2 ? { cerca } : null;
+    return { cerca, par, izquierda, pMano, zMano, zEnfrente };
   }
 
   // Arma zona(s) + aviso para una dirección con altura, teniendo en cuenta la mano
@@ -585,4 +628,7 @@
       .setContent(secs.length ? secs.map((f) => `<b>${esc(nombreDe(f))}</b>`).join("<br>") : "Fuera de todos los sectores")
       .openOn(map);
   });
+
+  // para pruebas automáticas
+  window.__buscador = { osmAltura, zonaConMano, resolverMano, nombreDe: (f) => nombreDe(f), listo: datosListos };
 })();
