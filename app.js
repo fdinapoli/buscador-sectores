@@ -184,6 +184,80 @@
     }
   });
 
+  // ---------- Mano de la calle (para direcciones sobre una calle límite) ----------
+  const COS = Math.cos((C.mapa.centro[0] * Math.PI) / 180);
+  const aXY = (p, o) => [(p[1] - o[1]) * 111320 * COS, (p[0] - o[0]) * 110540];   // metros [este, norte] desde o
+  const deXY = (v, o) => [o[0] + v[1] / 110540, o[1] + v[0] / (111320 * COS)];
+
+  // Con los números de puerta de OSM cercanos: hacia dónde crece la numeración y de qué lado van los pares
+  function geometriaMano(calle, altura, pt) {
+    if (!alturas) return null;
+    const n = parseInt(altura, 10);
+    const nombres = Object.keys(alturas.calles);
+    let cands = nombres.filter((k) => norm(k) === norm(calle));
+    if (!cands.length) cands = nombres.filter((k) => mismaCalle(k, calle));
+    let mejor = null;
+    for (const k of cands) {
+      const a = alturas.calles[k], pts = [];
+      for (let i = 0; i < a.length; i += 3) {
+        const v = aXY([alturas.base[0] + a[i + 1] / 1e5, alturas.base[1] + a[i + 2] / 1e5], pt);
+        if (Math.hypot(v[0], v[1]) < 250 && Math.abs(a[i] - n) <= 250) pts.push({ n: a[i], v });
+      }
+      const pares = pts.filter((p) => p.n % 2 === 0), impares = pts.filter((p) => p.n % 2 === 1);
+      if (pts.length < 3 || !pares.length || !impares.length) continue;
+      // dirección de numeración creciente (regresión posición ~ número)
+      const media = pts.reduce((s, p) => s + p.n, 0) / pts.length;
+      let dx = 0, dy = 0;
+      for (const p of pts) { dx += (p.n - media) * p.v[0]; dy += (p.n - media) * p.v[1]; }
+      const largo = Math.hypot(dx, dy);
+      if (!largo) continue;
+      const dir = [dx / largo, dy / largo], izq = [-dir[1], dir[0]];
+      const desvio = (g) => g.reduce((s, p) => s + p.v[0] * izq[0] + p.v[1] * izq[1], 0) / g.length;
+      const oPar = desvio(pares), oImpar = desvio(impares);
+      if (Math.abs(oPar - oImpar) < 4) continue; // no se distinguen las veredas
+      const r = { calle: k, dir, izq, paresIzq: oPar > oImpar, centro: (oPar + oImpar) / 2, cant: pts.length };
+      if (!mejor || r.cant > mejor.cant) mejor = r;
+    }
+    return mejor;
+  }
+
+  // Si el punto está sobre una calle límite, decide la zona según la mano (par / impar) de la altura
+  function resolverMano(calle, altura, pt) {
+    const cerca = zonasAlrededor(pt, 30);
+    if (cerca.length < 2) return null;
+    const g = geometriaMano(calle, altura, pt);
+    if (!g) return { cerca };
+    const par = parseInt(altura, 10) % 2 === 0;
+    const izquierda = par === g.paresIzq;
+    const s = izquierda ? 1 : -1;
+    // además, correrse unos metros hacia adentro de la cuadra (el 800 está al principio de la cuadra del 800,
+    // el 899 al final): resuelve las alturas que caen justo en una esquina con otra calle límite
+    const adentro = (parseInt(altura, 10) % 100 < 50 ? 1 : -1) * 12;
+    const vereda = (d) => deXY([g.izq[0] * (g.centro + d) + g.dir[0] * adentro, g.izq[1] * (g.centro + d) + g.dir[1] * adentro], pt);
+    const pMano = vereda(s * 15), pEnfrente = vereda(-s * 15);
+    return { cerca, par, izquierda, pMano, zMano: Geo.sectoresDe(pMano, sectores), zEnfrente: Geo.sectoresDe(pEnfrente, sectores) };
+  }
+
+  // Arma zona(s) + aviso para una dirección con altura, teniendo en cuenta la mano
+  function zonaConMano(calle, altura, pt) {
+    const orden = (a, b) => nombreDe(a).localeCompare(nombreDe(b), "es", { numeric: true });
+    const m = resolverMano(calle, altura, pt);
+    if (!m) return { secs: Geo.sectoresDe(pt, sectores), pt };
+    const nombres = (z) => (z.length ? z.map(nombreDe).join(" / ") : "fuera de zonas");
+    if (m.zMano && m.zMano.length === 1) {
+      const igual = nombres(m.zMano) === nombres(m.zEnfrente);
+      return {
+        secs: m.zMano,
+        pt: m.pMano,
+        aviso: igual ? null : `Calle límite: el ${altura} es mano ${m.par ? "par" : "impar"} (${m.izquierda ? "izquierda" : "derecha"} según crece la numeración) → ${nombres(m.zMano)}. Vereda de enfrente: ${nombres(m.zEnfrente)}.`,
+      };
+    }
+    return {
+      secs: m.cerca.sort(orden), limite: true, pt,
+      aviso: `Está sobre un límite entre ${m.cerca.length} zonas y no pude determinar la mano de la calle. Confirmá de qué vereda es.`,
+    };
+  }
+
   // Prueba la consulta con las variantes del nombre de cada calle hasta que Georef encuentre algo
   async function georefVariantes(armar, calle, otra) {
     const vc = variantes(calle), vo = otra ? variantes(otra) : [null];
@@ -199,18 +273,17 @@
   async function buscarAltura() {
     const calle = $("#calle").value.trim();
     const altura = $("#altura").value.trim();
-    // 1) Georef con el nombre tal cual  2) números de puerta de OSM  3) Georef con variantes del nombre
-    let res = await georef(`${calle} ${altura}`, calle);
-    let pt, nomenclatura, alts = [];
-    if (!res.length) {
-      await datosListos;
-      const o = osmAltura(calle, altura);
-      if (o) {
-        pt = [o.lat, o.lon];
-        nomenclatura = `${o.calle} ${altura} (OpenStreetMap${o.err ? ", aproximado" : ""})`;
-      } else {
-        res = await georefVariantes((a) => `${a} ${altura}`, calle);
-      }
+    // 1) números de puerta de OSM (más precisos en Tandil: error mediano ~18 m contra ~67 m de Georef)
+    // 2) Georef con el nombre tal cual  3) Georef con variantes del nombre
+    await datosListos;
+    let res = [], pt, nomenclatura, alts = [];
+    const o = osmAltura(calle, altura);
+    if (o) {
+      pt = [o.lat, o.lon];
+      nomenclatura = `${o.calle} ${altura}`;
+    } else {
+      res = await georef(`${calle} ${altura}`, calle);
+      if (!res.length) res = await georefVariantes((a) => `${a} ${altura}`, calle);
     }
     if (!pt) {
       if (!res.length) return mostrarError(`No encontré "${calle} ${altura}". Puede que esa calle no tenga la numeración cargada: probá con la pestaña Esquina o Entre calles.`);
@@ -218,14 +291,14 @@
       nomenclatura = res[0].nomenclatura;
       alts = alternativas(res);
     }
-    const secs = Geo.sectoresDe(pt, sectores);
+    const z = zonaConMano(calle, altura, pt);
 
     marcas.clearLayers();
-    L.circleMarker(pt, { radius: 8, color: "#fff", weight: 2, fillColor: secs[0] ? colorDe.get(secs[0]) : "#ff5f7e", fillOpacity: 1 })
+    L.circleMarker(z.pt, { radius: 8, color: "#fff", weight: 2, fillColor: z.secs[0] ? colorDe.get(z.secs[0]) : "#ff5f7e", fillOpacity: 1 })
       .bindPopup(esc(nomenclatura)).addTo(marcas);
-    map.setView(pt, Math.max(map.getZoom(), 16));
+    map.setView(z.pt, Math.max(map.getZoom(), z.aviso ? 18 : 16));
 
-    render({ secs, lineas: [`Interpretado: ${nomenclatura}`], alternativas: alts, destino: pt });
+    render({ secs: z.secs, limite: z.limite, aviso: z.aviso, lineas: [`Interpretado: ${nomenclatura}`], alternativas: alts, destino: z.pt });
   }
 
   // Zonas que hay en un radio chico alrededor de un punto (para detectar límites)
@@ -272,7 +345,12 @@
       .sort((a, b) => rank(a) - rank(b) || a.n.localeCompare(b.n, "es"));
   }
 
-  const zonaTexto = (pt) => {
+  const zonaTexto = (l) => {
+    const pt = l.c, dir = l.d && l.d.match(/^(.*\D)\s+(\d+)$/);
+    if (dir && zonasAlrededor(pt, 30).length > 1) {
+      const z = zonaConMano(dir[1].trim(), dir[2], pt);
+      if (!z.limite && z.secs.length) return z.secs.map(nombreDe).join(" / ");
+    }
     const cerca = zonasAlrededor(pt), dentro = Geo.sectoresDe(pt, sectores);
     const s = cerca.length > 1 ? cerca : dentro;
     return s.length ? s.map(nombreDe).sort((a, b) => a.localeCompare(b, "es", { numeric: true })).join(" / ") : "fuera de zonas";
@@ -293,12 +371,22 @@
     map.fitBounds(L.latLngBounds(m.slice(0, MAX).map((l) => l.c)).pad(0.2), { maxZoom: 16 });
     $("#resultado").innerHTML = `<div class="res"><div class="meta">${m.length} lugares${m.length > MAX ? ` (se muestran ${MAX})` : ""}. Tocá uno:</div>
       <ul class="lista-lugares">${m.slice(0, MAX).map((l, i) => `<li><button type="button" data-i="${i}">
-        <span class="ln">${esc(l.n)}</span><span class="lt">${esc(l.t)}${l.d ? " · " + esc(l.d) : ""}</span><span class="lz">${esc(zonaTexto(l.c))}</span>
+        <span class="ln">${esc(l.n)}</span><span class="lt">${esc(l.t)}${l.d ? " · " + esc(l.d) : ""}</span><span class="lz">${esc(zonaTexto(l))}</span>
       </button></li>`).join("")}</ul></div>`;
     $("#resultado").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", () => mostrarLugar(m[+b.dataset.i])));
   }
 
   function mostrarLugar(l) {
+    // Si el lugar tiene dirección con altura y está sobre un límite, decidir por la mano
+    const dir = l.d && l.d.match(/^(.*\D)\s+(\d+)$/);
+    if (dir && zonasAlrededor(l.c, 30).length > 1) {
+      const z = zonaConMano(dir[1].trim(), dir[2], l.c);
+      marcas.clearLayers();
+      L.circleMarker(z.pt, { radius: 8, color: "#fff", weight: 2, fillColor: z.secs[0] ? colorDe.get(z.secs[0]) : "#ff5f7e", fillOpacity: 1 })
+        .bindPopup(esc(l.n)).addTo(marcas);
+      map.setView(z.pt, Math.max(map.getZoom(), 18));
+      return render({ secs: z.secs, limite: z.limite, aviso: z.aviso, lineas: [l.n, `${l.t} · ${l.d}`], destino: l.c });
+    }
     const pt = l.c, secs = Geo.sectoresDe(pt, sectores), cerca = zonasAlrededor(pt);
     marcas.clearLayers();
     L.circleMarker(pt, { radius: 8, color: "#fff", weight: 2, fillColor: secs[0] ? colorDe.get(secs[0]) : "#ff5f7e", fillOpacity: 1 })
