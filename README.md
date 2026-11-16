@@ -49,6 +49,12 @@ git push -u origin main
 
 En GitHub: **Settings → Pages → Source: Deploy from a branch → `main` / `(root)`**. Queda en `https://USUARIO.github.io/buscador-sectores/`.
 
+## Instalar en el celular
+
+Es una PWA: en Android, abrí el sitio con Chrome y tocá **⬇ Instalar app** (arriba) o menú ⋮ → **Instalar app / Agregar a pantalla de inicio**. Queda con ícono propio y abre a pantalla completa. En iPhone: Safari → Compartir → **Agregar a inicio**.
+
+`sw.js` guarda la app y los datos para que funcione con poca señal (las búsquedas por altura con datos de OSM y los lugares andan sin conexión; el mapa de fondo y Georef necesitan red). Si cambiás la lista de archivos, subí la versión de `CACHE` en `sw.js`.
+
 ## Notas
 
 - Completá `localidad_censal` en `config.js` si el partido tiene varias localidades; si no, una calle con el mismo nombre en otro pueblo puede confundir la búsqueda.

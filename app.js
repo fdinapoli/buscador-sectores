@@ -629,6 +629,23 @@
       .openOn(map);
   });
 
+  // ---------- Instalar como app (PWA) ----------
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  let pedidoInstalar = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    pedidoInstalar = e;
+    $("#instalar").hidden = false;
+  });
+  $("#instalar").addEventListener("click", async () => {
+    if (!pedidoInstalar) return;
+    pedidoInstalar.prompt();
+    await pedidoInstalar.userChoice;
+    pedidoInstalar = null;
+    $("#instalar").hidden = true;
+  });
+  window.addEventListener("appinstalled", () => { $("#instalar").hidden = true; });
+
   // para pruebas automáticas
   window.__buscador = { osmAltura, zonaConMano, resolverMano, nombreDe: (f) => nombreDe(f), listo: datosListos };
 })();

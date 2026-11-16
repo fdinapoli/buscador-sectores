@@ -34,6 +34,10 @@ h1 { margin: 0; font-size: 18px; color: var(--accent); text-shadow: 0 0 8px #39f
 .cursor { animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .link { color: var(--dim); text-decoration: none; }
+.instalar {
+  margin-left: auto; background: var(--accent); color: var(--bg); border: none;
+  font: 700 13px var(--font); padding: 7px 12px; cursor: pointer;
+}
 .link:hover { color: var(--accent); }
 
 main { flex: 1; display: flex; min-height: 0; }
