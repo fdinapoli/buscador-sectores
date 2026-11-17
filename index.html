@@ -40,19 +40,19 @@
       </div>
 
       <form id="form" autocomplete="off">
-        <div class="campo-calle">
+        <div class="modo-direccion">
+          <label>Dirección
+            <input id="direccion" list="calles" required placeholder="ej: San Martín 1250" enterkeyhint="search">
+          </label>
+        </div>
+        <div class="campo-calle" hidden>
           <label>Calle
-            <input id="calle" list="calles" required placeholder="ej: San Martín">
+            <input id="calle" list="calles" placeholder="ej: San Martín">
           </label>
         </div>
         <div class="modo-lugar" hidden>
           <label>Lugar
             <input id="lugar" list="lugares" placeholder="ej: hospital, terminal, escuela 5">
-          </label>
-        </div>
-        <div class="modo-altura">
-          <label>Altura
-            <input id="altura" type="number" min="0" inputmode="numeric" placeholder="ej: 1250">
           </label>
         </div>
         <div class="modo-esquina" hidden>

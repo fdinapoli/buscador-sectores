@@ -54,7 +54,7 @@
     const [s, l] = A.length <= B.length ? [A, B] : [B, A];
     return s.slice(0, -1).every((t) => l.slice(0, -1).some((u) => u === t || (t.length === 1 && u[0] === t) || (u.length === 1 && t[0] === u)));
   }
-  let callesGeoref = [];
+  let callesGeoref = [], callesConocidas = new Set();
   function variantes(nombre) {
     const v = [nombre];
     for (const n of callesGeoref) if (norm(n) !== norm(nombre) && mismaCalle(n, nombre)) v.push(n);
@@ -94,6 +94,7 @@
     for (const n of Object.keys((alturas && alturas.calles) || {})) porNorm.set(norm(n), n);
     for (const n of callesGeoref) if (!porNorm.has(norm(n))) porNorm.set(norm(n), n);
     const nombres = [...porNorm.values()].sort((a, b) => a.localeCompare(b, "es"));
+    callesConocidas = new Set(porNorm.keys());
     $("#calles").innerHTML = nombres.map((n) => `<option value="${esc(n)}">`).join("");
   })();
 
@@ -156,25 +157,24 @@
   }
 
   // ---------- UI ----------
-  let modo = "altura";
+  let modo = "altura", ultimaAltura = "";
   document.querySelectorAll(".tabs button").forEach((b) =>
     b.addEventListener("click", () => {
       modo = b.dataset.modo;
       document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
-      $(".campo-calle").hidden = modo === "lugar";
-      $(".modo-altura").hidden = modo !== "altura";
+      $(".campo-calle").hidden = modo === "lugar" || modo === "altura";
+      $(".modo-direccion").hidden = modo !== "altura";
       $(".modo-esquina").hidden = modo !== "esquina";
       $(".modo-entre").hidden = modo !== "entre";
       $(".modo-lugar").hidden = modo !== "lugar";
-      $("#calle").required = modo !== "lugar";
-      $("#altura").required = modo === "altura";
+      $("#calle").required = modo !== "lugar" && modo !== "altura";
+      $("#direccion").required = modo === "altura";
       $("#cruce").required = modo === "esquina";
       $("#entre1").required = $("#entre2").required = modo === "entre";
       $("#lugar").required = modo === "lugar";
-      (modo === "lugar" ? $("#lugar") : $("#calle")).focus();
+      (modo === "lugar" ? $("#lugar") : modo === "altura" ? $("#direccion") : $("#calle")).focus();
     })
   );
-  $("#altura").required = true;
 
   $("#form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -182,7 +182,7 @@
     btn.disabled = true;
     btn.textContent = "Buscando…";
     try {
-      if (modo === "altura") await buscarAltura();
+      if (modo === "altura") await buscarDireccion();
       else if (modo === "esquina") await buscarEsquina();
       else if (modo === "lugar") await buscarLugar();
       else await buscarEntre();
@@ -313,9 +313,41 @@
     return [];
   }
 
-  async function buscarAltura() {
-    const calle = $("#calle").value.trim();
-    const altura = $("#altura").value.trim();
+  // Separa "San Martín 1250" en calle y altura. Acepta "San Martín al 1250", "San Martín nº 1250",
+  // "1250 San Martín" y calles que empiezan o terminan con número ("9 de Julio 500", "Pasaje 15 300").
+  function separarDireccion(texto) {
+    const t = texto.replace(/\s+/g, " ").replace(/[.,;]+$/, "").trim();
+    const conocida = (c) => callesConocidas.has(norm(c));
+    if (conocida(t)) return { calle: t, altura: null };
+    let m = t.match(/^(.*?)[\s,]+(?:al|n[°ºo]?\.?|nro\.?|num(?:ero)?\.?|#)?\s*(\d{1,5})(?:\s*bis)?$/i);
+    if (m && sig(m[1]).length) return { calle: m[1].trim(), altura: m[2] };
+    m = t.match(/^(\d{1,5})\s+(?!de\b)(.+)$/i);
+    if (m && sig(m[2]).length) return { calle: m[2].trim(), altura: m[1] };
+    return { calle: t, altura: null };
+  }
+
+  // Pestaña Altura: un solo campo. También entiende "X y Y" / "X esquina Y" y "X entre A y B".
+  async function buscarDireccion() {
+    const texto = $("#direccion").value.trim();
+    const entre = texto.match(/^(.+?)\s+entre\s+(.+?)\s+(?:y|e)\s+(.+)$/i);
+    if (entre) {
+      [$("#calle").value, $("#entre1").value, $("#entre2").value] = [entre[1], entre[2], entre[3]];
+      return buscarEntre();
+    }
+    const d = separarDireccion(texto);
+    if (!d.altura) {
+      const esq = texto.match(/^(.+?)\s+(?:y|esquina|esq\.?)\s+(.+)$/i);
+      if (esq && !callesConocidas.has(norm(texto))) {
+        [$("#calle").value, $("#cruce").value] = [esq[1], esq[2]];
+        return buscarEsquina();
+      }
+      return mostrarError(`Falta la altura: escribí la calle y el número, ej: "${d.calle || "San Martín"} 1250". También podés poner "Pinto y Colón" o "Colón entre Pinto y Alem".`);
+    }
+    return buscarAltura(d.calle, d.altura);
+  }
+
+  async function buscarAltura(calle, altura) {
+    ultimaAltura = altura;
     // 1) números de puerta de OSM (más precisos en Tandil: error mediano ~18 m contra ~67 m de Georef)
     // 2) Georef con el nombre tal cual  3) Georef con variantes del nombre
     await datosListos;
@@ -522,7 +554,11 @@
     html += "</div>";
     $("#resultado").innerHTML = html;
     $("#resultado").querySelectorAll("[data-calle]").forEach((b) =>
-      b.addEventListener("click", () => { $("#calle").value = b.dataset.calle; $("#form").requestSubmit(); }));
+      b.addEventListener("click", () => {
+        if (modo === "altura") $("#direccion").value = `${b.dataset.calle} ${ultimaAltura}`;
+        else $("#calle").value = b.dataset.calle;
+        $("#form").requestSubmit();
+      }));
   }
 
   function mostrarError(msg) {
@@ -647,5 +683,5 @@
   window.addEventListener("appinstalled", () => { $("#instalar").hidden = true; });
 
   // para pruebas automáticas
-  window.__buscador = { osmAltura, zonaConMano, resolverMano, nombreDe: (f) => nombreDe(f), listo: datosListos };
+  window.__buscador = { separarDireccion, osmAltura, zonaConMano, resolverMano, nombreDe: (f) => nombreDe(f), listo: datosListos };
 })();
